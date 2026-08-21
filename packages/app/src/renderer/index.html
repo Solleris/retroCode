@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>retroCode</title>
+</head>
+<body>
+  <header id="bar">
+    <button id="proj" type="button"><span id="path">retro</span><span class="caret"></span></button>
+    <span id="spacer"></span>
+    <span id="attention"></span>
+    <span id="hint"></span>
+    <span id="status" data-state="close" hidden></span>
+  </header>
+
+  <div id="body">
+    <!-- overlay by default (position:fixed ignores flex); pinned becomes a panel -->
+    <div id="navwrap" hidden><aside id="nav"></aside></div>
+    <main id="stage"></main>
+    <aside id="lens"></aside>
+  </div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>
