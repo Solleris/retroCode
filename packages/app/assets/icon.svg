@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    retroCode — amber phosphor on near-black.
+
+    The name asks for a CRT, and the product is ALREADY amber (#EFA84C is the
+    theme's --signal). So the icon invents no new brand: it is the terminal
+    screen the app wraps, seen up close. Prompt + block cursor = "waiting on
+    you", which is literally the state the Lens exists to show.
+
+    All the structure lives in mass and position, not in detail: at 16px the
+    scanlines and the bloom disappear and two fat legible shapes remain.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="512" y1="88" x2="512" y2="936" gradientUnits="userSpaceOnUse">
+      <stop offset="0"    stop-color="#1C242F"/>
+      <stop offset="0.45" stop-color="#0F141A"/>
+      <stop offset="1"    stop-color="#070910"/>
+    </linearGradient>
+
+    <!-- glass: a highlight on the top edge only, like every macOS icon -->
+    <linearGradient id="bezel" x1="512" y1="88" x2="512" y2="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0"   stop-color="#6D7C8D" stop-opacity="0.55"/>
+      <stop offset="0.5" stop-color="#39434F" stop-opacity="0.16"/>
+      <stop offset="1"   stop-color="#39434F" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <!-- curvatura de tubo: o centro da tela recebe mais luz que os cantos -->
+    <!--
+      Tube vignette. The first version used 0.42 black at the edge and jumped
+      from amber to black in two stops: across a 470px radius that does not fit
+      in 8 bits and showed up as concentric RINGS. A small delta with spaced
+      stops is what a large radial gradient can hold.
+    -->
+    <radialGradient id="crt" cx="512" cy="480" r="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0"    stop-color="#EFA84C" stop-opacity="0.055"/>
+      <stop offset="0.45" stop-color="#EFA84C" stop-opacity="0.018"/>
+      <stop offset="0.75" stop-color="#000000" stop-opacity="0.06"/>
+      <stop offset="1"    stop-color="#000000" stop-opacity="0.20"/>
+    </radialGradient>
+
+    <pattern id="scan" width="10" height="10" patternUnits="userSpaceOnUse">
+      <rect width="10" height="3" fill="#EFA84C" opacity="0.05"/>
+    </pattern>
+
+    <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+
+    <filter id="drop" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="22" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+
+    <clipPath id="screen">
+      <rect x="88" y="88" width="848" height="848" rx="196"/>
+    </clipPath>
+  </defs>
+
+  <g filter="url(#drop)">
+    <rect x="88" y="88" width="848" height="848" rx="196" fill="url(#tile)"/>
+
+    <g clip-path="url(#screen)">
+      <rect x="88" y="88" width="848" height="848" fill="url(#scan)"/>
+      <rect x="88" y="88" width="848" height="848" fill="url(#crt)"/>
+
+      <!-- phosphor: the bloom leaks outside the shapes, as in a real tube -->
+      <g filter="url(#bloom)" opacity="0.7">
+        <path d="M356 368 L478 512 L356 656" fill="none" stroke="#EFA84C" stroke-width="84"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="592" y="336" width="118" height="352" rx="18" fill="#EFA84C"/>
+      </g>
+
+      <path d="M356 368 L478 512 L356 656" fill="none" stroke="#F6B95F" stroke-width="84"
+            stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="592" y="336" width="118" height="352" rx="18" fill="#F6B95F"/>
+    </g>
+
+    <rect x="88.5" y="88.5" width="847" height="847" rx="195.5"
+          fill="none" stroke="url(#bezel)" stroke-width="3"/>
+  </g>
+</svg>
