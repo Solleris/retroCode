@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    // DOM.Iterable: without it, `for (const el of querySelectorAll(...))` does
+    // not compile, despite working in every browser forever.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    /*
+     * The code imports with the .ts extension because at runtime the resolvers
+     * are Node's type stripping (daemon) and rollup (app) — neither needs a tsc
+     * build. tsc, however, does NOT rewrite those specifiers when emitting: it
+     * produced a dist/main.js importing "./paths.ts", a file that does not exist
+     * in dist. Result: an innocent `tsc -b` created a broken build that the app
+     * preferred over the working source, and the daemon stopped starting
+     * forever.
+     *
+     * With allowImportingTsExtensions + emitDeclarationOnly, the typecheck
+     * checks and nothing more — no fake executable artefact.
+     */
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "composite": true,
+    "sourceMap": true
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+.retro/
+.DS_Store
+
+# Machine-local preferences, not the project's.
+.claude/settings.local.json
+
+# Throwaway development probes: they exist for one bug and die with it.
+packages/daemon/src/_*.mjs

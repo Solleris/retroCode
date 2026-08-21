@@ -1,0 +1,28 @@
+{
+  "name": "retro",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=25"
+  },
+  "scripts": {
+    "daemon": "node --watch packages/daemon/src/main.ts",
+    "app": "cd packages/app && ./node_modules/.bin/electron-vite dev",
+    "dev": "echo 'Rode em dois terminais:  bun run daemon  |  bun run app'",
+    "typecheck": "tsc -b packages/protocol packages/daemon packages/app",
+    "postinstall": "node scripts/fix-native.mjs",
+    "fix-native": "node scripts/fix-native.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "trustedDependencies": [
+    "node-pty",
+    "better-sqlite3",
+    "electron"
+  ]
+}
