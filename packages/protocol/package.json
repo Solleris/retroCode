@@ -1,0 +1,7 @@
+{
+  "name": "@retro/protocol",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./frame": "./src/frame.ts", "./layout": "./src/layout.ts" },
+  "dependencies": { "zod": "^4.4.3" }
+}
