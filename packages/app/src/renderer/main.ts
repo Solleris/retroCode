@@ -85,6 +85,8 @@ const lens = new Lens($("#lens"), {
   onPickIssue: (i) => retro.send({ t: "fetchLinearIssue", id: i.id }),
   onPickPage: (p) => retro.send({ t: "fetchNotionPage", url: p.url, title: p.title }),
   onSessionDiff: (paths) => openDiff(paths),
+  onFocusSession: focusSessionPane,
+  onResumeSession: resumeClaudeSession,
   onOpenBranch: (branch) => {
     const project = (focusedPty ? ptyProjects.get(focusedPty) : null) ?? root;
     retro.send({ t: "branchUrl", root: project, branch });
@@ -325,6 +327,63 @@ function newClaudeSession(): void {
     launchIn(surface.ptyId, `claude --session-id ${sessionId}`);
     lens.setOwnedSessions(new Set(ptySessions.values()), sessionId);
   }
+}
+
+/**
+ * A lens row → the pane running it.
+ *
+ * `ptySessions` is indexed the way the writer needs it (ptyId → sessionId,
+ * written when ⌘J launches the CLI); reading it backwards is a scan over at
+ * most a handful of live terminals, so an inverse map would be a second thing
+ * to keep in sync for nothing.
+ *
+ * A miss is normal, not an error: `unmount` drops the entry when the pane
+ * closes, and the lens keeps showing the session because its transcript is
+ * still on disk. The row simply stays selected — and the resume button appears,
+ * because the session stopped being one of ours.
+ */
+function focusSessionPane(sessionId: string): void {
+  const ptyId = [...ptySessions].find(([, id]) => id === sessionId)?.[0];
+  if (!ptyId) return;
+  const leaf = tiling.allLeaves()
+    .find((l) => l.surface.s === "terminal" && l.surface.ptyId === ptyId);
+  if (leaf) tiling.focus(leaf.id);
+}
+
+/**
+ * A pane for a session that no longer has one: `claude --resume <id>`.
+ *
+ * Two things make this correct rather than approximate:
+ *
+ * 1. `--resume` REUSES the session id — creating a new one is opt-in behind
+ *    `--fork-session`. So registering the id in `ptySessions` right away is
+ *    honest, and the row this came from immediately shows `aqui`.
+ *
+ * 2. The CLI resolves `--resume` against the CWD's project directory, and the
+ *    daemon watches `~/.claude/projects/<munge(gitRoot)>` — so every session in
+ *    the list was started AT the repo root. A new pane, however, is born in the
+ *    focused terminal's cwd, which may be a subdirectory someone cd'd into.
+ *    Hence the `cd`, emitted only when the two actually differ: in the common
+ *    case the terminal shows the bare `claude --resume` and nothing else.
+ *
+ * Same idiom as `onOpenBranch` for the project — literally the expression
+ * `refreshLensProject` uses, so what we resume against is what the lens shows.
+ */
+function resumeClaudeSession(sessionId: string): void {
+  const project = (focusedPty ? ptyProjects.get(focusedPty) : null) ?? root;
+  const born = (focusedPty ? ptyCwds.get(focusedPty) : null) ?? root;
+  const surface = newTerminal();
+  tiling.split("h", surface);
+  if (surface.s !== "terminal") return;
+  ptySessions.set(surface.ptyId, sessionId);
+  const prefix = born === project ? "" : `cd ${shq(project)} && `;
+  launchIn(surface.ptyId, `${prefix}claude --resume ${sessionId}`);
+  lens.setOwnedSessions(new Set(ptySessions.values()), sessionId);
+}
+
+/** POSIX single-quoting: a repo path may hold a space, and may hold a quote. */
+function shq(p: string): string {
+  return `'${p.replace(/'/g, "'\\''")}'`;
 }
 
 /**

@@ -835,6 +835,17 @@ body.nav-pinned #nav { width: 236px; background: var(--bg); }
   color: var(--ink-dim); font-style: normal;
 }
 
+/* The way back into a session with no pane. It sits above the meters because
+   it is the only control in this rail that STARTS something — the diff button
+   further down only looks. Same shape as that one so they read as one family. */
+.lens-resume-btn {
+  margin: 8px 14px 2px; padding: 4px 9px;
+  border: 1px solid var(--rule); border-radius: 2px;
+  color: var(--ink-dim); font-size: var(--fs-sm); text-align: left;
+}
+.lens-resume-btn:hover { color: var(--signal); border-color: var(--signal); }
+.lens-resume-btn .ic { color: var(--signal); }
+
 .lens-diff-btn {
   margin: 6px 14px 2px; padding: 4px 9px;
   border: 1px solid var(--rule); border-radius: 2px;

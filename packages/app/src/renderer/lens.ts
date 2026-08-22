@@ -5,6 +5,10 @@
  * and the lens shows the sessions of that terminal's repo — not of the "open
  * project". The header says which repo it is talking about.
  *
+ * A row is not just a readout: one that owns a pane focuses it, and one whose
+ * terminal is gone offers `claude --resume` in a new pane. Both directions of
+ * the ⌘J correlation, so the list is navigable and not only legible.
+ *
  * The connectors (Linear/Notion) use the user's own claude MCP servers, via the
  * daemon. Clicking an item injects the prompt into the focused terminal WITHOUT
  * sending — you review it and press enter.
@@ -57,6 +61,8 @@ export class Lens {
   #onPickPage: (page: NotionPage) => void;
   #onSessionDiff: (paths: string[]) => void;
   #onOpenBranch: (branch: string) => void;
+  #onFocusSession: (sessionId: string) => void;
+  #onResumeSession: (sessionId: string) => void;
 
   constructor(host: HTMLElement, cb: {
     onOpenFile: (path: string) => void;
@@ -66,6 +72,8 @@ export class Lens {
     onPickPage: (page: NotionPage) => void;
     onSessionDiff: (paths: string[]) => void;
     onOpenBranch: (branch: string) => void;
+    onFocusSession: (sessionId: string) => void;
+    onResumeSession: (sessionId: string) => void;
   }) {
     this.#el = host;
     this.#onOpenFile = cb.onOpenFile;
@@ -75,6 +83,8 @@ export class Lens {
     this.#onPickPage = cb.onPickPage;
     this.#onSessionDiff = cb.onSessionDiff;
     this.#onOpenBranch = cb.onOpenBranch;
+    this.#onFocusSession = cb.onFocusSession;
+    this.#onResumeSession = cb.onResumeSession;
 
     host.innerHTML = `
       <div class="lens-repo"></div>
@@ -234,13 +244,26 @@ export class Lens {
         + (mine ? " mine" : "")
         + (isFocused ? " focused-pane" : "");
       if (isFocused) row.title = t("lens.hereTitle");
+      else if (mine) row.title = t("lens.focusTitle");
       const pct = s.ctxWindow ? Math.round((s.ctxTokens / s.ctxWindow) * 100) : 0;
       row.innerHTML = `<span class="dot ${st.dot}"></span>
         <span class="lens-title">${esc(s.title)}</span>
         ${isFocused ? `<span class="lens-here">${t("lens.here")}</span>` : ""}
         ${pct >= 40 ? `<span class="lens-ctx ${ctxTier(pct)}">${pct}%</span>` : ""}
         <span class="lens-ago">${ago(s.lastAt)}</span>`;
-      row.addEventListener("click", () => { this.#selectedId = s.id; this.#render(); });
+      /*
+       * A row that owns a pane FOCUSES it — the inverse of the ⌘J correlation.
+       *
+       * Until now that link ran one way only: the pane could say which row was
+       * its own (the `aqui` badge), and the row could not point back. Selecting
+       * first and focusing after means a dead pty degrades to plain selection
+       * instead of a click that does nothing.
+       */
+      row.addEventListener("click", () => {
+        this.#selectedId = s.id;
+        this.#render();
+        if (mine) this.#onFocusSession(s.id);
+      });
       this.#list.append(row);
     }
     this.#renderDetail(sessions);
@@ -280,6 +303,29 @@ export class Lens {
         br.addEventListener("click", () => this.#onOpenBranch(s.branch));
       }
       this.#detail.append(br);
+    }
+
+    /*
+     * RESUME — the way back into a session that has no pane.
+     *
+     * Most rows here are transcripts on disk: the terminal that ran them is
+     * long gone, and clicking one was a dead end. `--resume` REUSES the
+     * original session id (forking is opt-in, `--fork-session`), so the pane
+     * this opens keeps answering for this very row — no second id to reconcile.
+     *
+     * Hidden in two cases. For a session we own, because it already has a pane
+     * and a second process appending to the same transcript is not something
+     * to offer. For one that is `working`, because that is somebody's live
+     * turn — the transcript is being written right now.
+     */
+    if (!this.#owned.has(s.id) && s.state !== "working") {
+      const resumeBtn = document.createElement("button");
+      resumeBtn.type = "button";
+      resumeBtn.className = "lens-resume-btn";
+      resumeBtn.innerHTML = `${icons.resume}<span>${t("lens.resume")}</span>`;
+      resumeBtn.title = t("lens.resumeTitle");
+      resumeBtn.addEventListener("click", () => this.#onResumeSession(s.id));
+      this.#detail.append(resumeBtn);
     }
 
     // Context bar: a bar is a bar, a number is a number — the label moved off

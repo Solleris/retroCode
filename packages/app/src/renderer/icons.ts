@@ -27,6 +27,8 @@ export const icons = {
   issue: SVG('<path d="M8 2l6 6-6 6-6-6z"/>'),
   /** documento (Notion) */
   doc: SVG('<path d="M4 2.5h5l3 3V13a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 4 13z"/><path d="M9 2.5V6h3"/><path d="M6.5 9h3"/><path d="M6.5 11h3"/>'),
+  /** retomar uma sessão — o play universal, legível a 13px */
+  resume: SVG('<path d="M5.5 3.5l7 4.5-7 4.5z"/>'),
   /** ramo do git */
   branch: SVG('<circle cx="5" cy="4" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="11" cy="7" r="1.6"/><path d="M5 5.6v4.8"/><path d="M5 8.5h3.2A2.4 2.4 0 0 0 10.6 8"/>'),
   /** disclosure arrow (tree) — replaces ▸ ▾ */
