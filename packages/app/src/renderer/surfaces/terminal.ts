@@ -90,6 +90,34 @@ export function createTerminal(ptyId: string, cwd: string): TerminalSurface {
 
   term.onData((s) => retro.write(ptyId, enc.encode(s)));
 
+  /**
+   * Shift+Enter (and Option+Enter) insert a newline instead of submitting.
+   *
+   * A terminal cannot tell Enter from Shift+Enter on its own — both produce a
+   * bare CR. That is the whole reason `claude` ships `/terminal-setup`, which
+   * goes and edits iTerm2's plist and VS Code's keybindings.json to make that
+   * chord send something else. What it makes them send is ESC CR, and ESC CR is
+   * what the CLI's input handler reads as "new line, do not submit".
+   *
+   * retroCode owns its own terminal, so it can just send that — no setup step,
+   * no file for the user to let a tool rewrite.
+   *
+   * Option+Enter is handled HERE rather than by turning on xterm's
+   * `macOptionIsMeta`, and the difference matters: that flag would route every
+   * Option chord through meta, so Option+e would stop being a dead key and
+   * typing "á" would break. Intercepting one key costs nothing and leaves the
+   * whole keyboard alone.
+   *
+   * Returning false is what stops xterm from also emitting its default CR.
+   */
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== "keydown" || ev.key !== "Enter") return true;
+    if (ev.metaKey || ev.ctrlKey) return true;          // ⌘⏎ and ^⏎ stay untouched
+    if (!ev.shiftKey && !ev.altKey) return true;        // a plain Enter still submits
+    retro.write(ptyId, enc.encode("\x1b\r"));
+    return false;
+  });
+
   const doFit = (): void => {
     try {
       fit.fit();
