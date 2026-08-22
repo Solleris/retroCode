@@ -102,27 +102,59 @@ const ptySessions = new Map<string, string>();
 let focusedPty: string | null = null;
 
 /**
+ * THE APP'S OWN SESSION — what the previous run knew about each pane.
+ *
+ * The layout already survived a quit (localStorage, per project). What did not
+ * was WHICH claude session lived in each pane: `ptySessions` was a bare Map, so
+ * reopening gave you the same three terminals as strangers — no `aqui` badge,
+ * no click-to-focus, and the resume button offering to resume a session that
+ * was live on screen.
+ *
+ * The cwd travels with the session id because the two are not separable: the
+ * CLI resolves `--resume` against the project directory derived from the cwd,
+ * so a session recorded in another repo can only be resumed from there.
+ */
+interface SavedPane { session: string; cwd?: string }
+const restored: Record<string, SavedPane> = {};
+
+/**
  * Launch lines waiting for their pty to EXIST.
  *
  * Writing straight after the split looks right and loses the bytes.
  * `PtyManager.write` drops anything addressed to a ptyId it does not know (the
  * early `if (!e?.alive) return`), and `createTerminal` only asks for the spawn
  * on the next animation frame — so the command raced ahead of the pty and
- * vanished. Measured against a running daemon: a write sent before
+ * vanished. Measured against the running daemon: a write sent before
  * `spawnTerminal` never reaches the shell; the same write after it does.
  *
- * The comment this replaces reasoned that input typed before the shell finished
- * booting would sit in the TTY buffer and run afterwards. True — and about a pty
- * that exists. The problem was never the shell's readiness.
+ * The old comment here reasoned that input typed before the shell finished
+ * booting would sit in the TTY buffer and run afterwards. True — and about a
+ * pty that exists. The problem was never the shell's readiness.
  *
  * So the line waits for `terminalSpawned`, the one moment the app knows there is
- * something to receive it.
+ * something to receive it. Consuming the entry doubles as the marker that says
+ * "this spawn's command is accounted for", which is what keeps the automatic
+ * resume below from writing a second one on top.
  */
 const pendingLaunch = new Map<string, string>();
 
 /** Types `line` into that pane as soon as its pty is real. Newline included. */
 function launchIn(ptyId: string, line: string): void {
   pendingLaunch.set(ptyId, line);
+}
+
+function sessionsKey(): string { return `retro.sessions:${root}`; }
+
+/** Mirrors the live maps into storage. Called on every mutation — it is ~200 bytes. */
+function saveSessions(): void {
+  const out: Record<string, SavedPane> = {};
+  for (const [ptyId, session] of ptySessions) {
+    // A pane you never focused has no resolved cwd yet; what the previous run
+    // recorded is better than nothing, and better than the project root.
+    const cwd = ptyCwds.get(ptyId) ?? restored[ptyId]?.cwd;
+    out[ptyId] = cwd ? { session, cwd } : { session };
+  }
+  try { localStorage.setItem(sessionsKey(), JSON.stringify(out)); } catch { /* quota: carry on */ }
 }
 
 function refreshLensProject(): void {
@@ -172,9 +204,16 @@ window.addEventListener("retro:pick-file-for-context", () => {
 const tiling = new TilingHost($("#stage"), { s: "empty" }, {
   mount(_id, surface) {
     if (surface.s === "terminal") {
-      // Inherits the focused terminal's cwd; falls back to the project root.
+      /*
+       * A RESTORED pane is born in its own cwd, not the focused pane's.
+       *
+       * Inheriting is right for a pane you just opened — you want a shell next
+       * to where you are. It is wrong for one coming back from the last run:
+       * its session was recorded against a specific directory, and if the
+       * daemon died the shell spawned here is the one that has to resume it.
+       */
       const inherited = focusedPty ? ptyCwds.get(focusedPty) : undefined;
-      const t = createTerminal(surface.ptyId, inherited ?? root ?? ".");
+      const t = createTerminal(surface.ptyId, restored[surface.ptyId]?.cwd ?? inherited ?? root ?? ".");
       terms.set(surface.ptyId, t);
       return t.el;
     }
@@ -210,6 +249,8 @@ const tiling = new TilingHost($("#stage"), { s: "empty" }, {
       ptySessions.delete(surface.ptyId);
       ptyCwds.delete(surface.ptyId);
       pendingLaunch.delete(surface.ptyId);
+      delete restored[surface.ptyId];
+      saveSessions();
     } else if (surface.s === "editor") {
       docs.get(surface.path)?.dispose();
       docs.delete(surface.path);
@@ -326,6 +367,7 @@ function newClaudeSession(): void {
     ptySessions.set(surface.ptyId, sessionId);
     launchIn(surface.ptyId, `claude --session-id ${sessionId}`);
     lens.setOwnedSessions(new Set(ptySessions.values()), sessionId);
+    saveSessions();
   }
 }
 
@@ -376,9 +418,13 @@ function resumeClaudeSession(sessionId: string): void {
   tiling.split("h", surface);
   if (surface.s !== "terminal") return;
   ptySessions.set(surface.ptyId, sessionId);
+  // The project is where the transcript lives, so it is what gets recorded —
+  // not `born`, which is only where the shell happened to open.
+  ptyCwds.set(surface.ptyId, project);
   const prefix = born === project ? "" : `cd ${shq(project)} && `;
   launchIn(surface.ptyId, `${prefix}claude --resume ${sessionId}`);
   lens.setOwnedSessions(new Set(ptySessions.values()), sessionId);
+  saveSessions();
 }
 
 /** POSIX single-quoting: a repo path may hold a space, and may hold a quote. */
@@ -507,18 +553,31 @@ retro.onControl((ev) => {
     }
 
     /*
-     * The pty is up — so anything queued for it can go now.
+     * A pty came up. The only question worth asking: is it THE SAME ONE?
      *
-     * This is the first thing in the app to listen to `terminalSpawned` at all:
-     * the event was being broadcast and dropped on the floor, which is exactly
-     * why the race above went unnoticed.
+     * `fresh` false (or absent — see the protocol note) means the daemon still
+     * had it: the shell is where you left it, the claude inside it is still
+     * running, and touching it would be vandalism. `fresh` true means the
+     * daemon died and this is a new shell in a pane that used to hold a
+     * session — the one case where putting claude back is the right move.
+     *
+     * `--resume` reuses the session id, so this pane keeps answering for the
+     * same lens row. If the session never produced a transcript (⌘J opened it
+     * and you quit before the first message) the CLI says so in the terminal,
+     * which is the honest place for that news.
      */
     case "terminalSpawned": {
       const ptyId = e["ptyId"] as string;
       const pending = pendingLaunch.get(ptyId);
-      if (pending === undefined) return;
-      pendingLaunch.delete(ptyId);
-      retro.write(ptyId, enc.encode(`${pending}\n`));
+      if (pending !== undefined) {
+        pendingLaunch.delete(ptyId);
+        retro.write(ptyId, enc.encode(`${pending}\n`));
+        return;
+      }
+      if (e["fresh"] !== true) return;
+      const sessionId = ptySessions.get(ptyId);
+      if (!sessionId) return;
+      retro.write(ptyId, enc.encode(`claude --resume ${sessionId}\n`));
       return;
     }
 
@@ -529,7 +588,7 @@ retro.onControl((ev) => {
         if (ptyId === focusedPty) lens.setProject(project);
       }
       const cwd = e["cwd"] as string | null;
-      if (cwd) ptyCwds.set(ptyId, cwd);
+      if (cwd) { ptyCwds.set(ptyId, cwd); saveSessions(); }
       return;
     }
 
@@ -628,7 +687,11 @@ function reattachTerminals(): void {
     if (l.surface.s !== "terminal") continue;
     const term = terms.get(l.surface.ptyId);
     if (!term) continue;
-    retro.send({ t: "spawnTerminal", ptyId: l.surface.ptyId, cwd: root, cols: 80, rows: 24 });
+    // Each pane's own cwd. `root` for everyone was fine while a respawn meant
+    // an empty shell; now the shell may have to resume a session, and that only
+    // resolves from the directory the session was recorded in.
+    const cwd = ptyCwds.get(l.surface.ptyId) ?? restored[l.surface.ptyId]?.cwd ?? root;
+    retro.send({ t: "spawnTerminal", ptyId: l.surface.ptyId, cwd, cols: 80, rows: 24 });
     term.fit();   // sends the real dimensions right after
   }
 }
@@ -702,11 +765,55 @@ function restoreLayout(): boolean {
   } catch { return false; }
 }
 
-if (!restoreLayout()) {
+/**
+ * The pane → claude-session links from the last run.
+ *
+ * Runs BETWEEN `tiling.restore()` and `tiling.start()`, and the sandwich is not
+ * incidental: `restore` installs the tree without rendering, so `allLeaves()`
+ * can be read here to know which ptyIds actually came back — and `start()` is
+ * what calls `mount`, which needs `restored` populated to birth each terminal
+ * in its own cwd.
+ *
+ * Entries for panes that did NOT come back are dropped rather than kept. The
+ * alternative is a map that only ever grows, holding session ids for panes
+ * nobody will see again.
+ */
+function restoreSessions(): void {
+  let raw: string | null = null;
+  try { raw = localStorage.getItem(sessionsKey()); } catch { return; }
+  if (!raw) return;
+  let saved: unknown;
+  try { saved = JSON.parse(raw); } catch { return; }
+  if (!saved || typeof saved !== "object") return;
+
+  const live = new Set<string>();
+  for (const l of tiling.allLeaves()) {
+    if (l.surface.s === "terminal") live.add(l.surface.ptyId);
+  }
+  for (const [ptyId, rec] of Object.entries(saved as Record<string, unknown>)) {
+    if (!live.has(ptyId)) continue;
+    // Persisted state is untrusted input, same as the layout above.
+    if (!rec || typeof rec !== "object") continue;
+    const { session, cwd } = rec as { session?: unknown; cwd?: unknown };
+    if (typeof session !== "string" || !session) continue;
+    restored[ptyId] = typeof cwd === "string" && cwd ? { session, cwd } : { session };
+    ptySessions.set(ptyId, session);
+  }
+  saveSessions();   // rewrite pruned
+}
+
+if (restoreLayout()) restoreSessions();
+else {
   // One terminal, ready for `claude`. The screen is born in its real shape.
   tiling.setSurface(tiling.allLeaves()[0]!.id, newTerminal());
 }
 tiling.start();
+/*
+ * `start()` announces ownership only if the leaf it focuses is a terminal.
+ * Restore a layout whose first pane is an editor and the lens would come up
+ * blind to sessions it already knows about — so it is told explicitly.
+ */
+lens.setOwnedSessions(new Set(ptySessions.values()), focusedPty ? ptySessions.get(focusedPty) : undefined);
 loadProject(root);
 // Initial state is pulled: a push emitted before the listener exists is lost,
 // and that has already cost dearly three times in this app.

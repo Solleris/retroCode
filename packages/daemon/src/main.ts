@@ -219,7 +219,8 @@ async function handle(sock: net.Socket, raw: unknown): Promise<void> {
       if (vivo) {
         const back = ptys.scrollback(req.ptyId);
         if (back && back.length) sock.write(encodePty(req.ptyId, back));
-        send(sock, { t: "terminalSpawned", ptyId: vivo.ptyId, pid: vivo.pid, cwd: vivo.cwd });
+        send(sock, { t: "terminalSpawned", ptyId: vivo.ptyId, pid: vivo.pid, cwd: vivo.cwd,
+                     fresh: false });
         return;
       }
       try {
@@ -228,7 +229,8 @@ async function handle(sock: net.Socket, raw: unknown): Promise<void> {
           .run(info.ptyId, info.cwd, Date.now());
         log("pty spawn", info.ptyId, "pid", info.pid, info.cwd);
         ev(`term:${info.ptyId}`, "lane-start", info.cwd);
-        broadcast({ t: "terminalSpawned", ptyId: info.ptyId, pid: info.pid, cwd: info.cwd });
+        broadcast({ t: "terminalSpawned", ptyId: info.ptyId, pid: info.pid, cwd: info.cwd,
+                    fresh: true });
       } catch (e) {
         send(sock, { t: "error", message: `spawn falhou`, cause: String(e) });
       }
@@ -242,7 +244,8 @@ async function handle(sock: net.Socket, raw: unknown): Promise<void> {
       // output on top of a terminal that is still about to receive history.
       const back = ptys.scrollback(req.ptyId);
       if (back && back.length) sock.write(encodePty(req.ptyId, back));
-      send(sock, { t: "terminalSpawned", ptyId: info.ptyId, pid: info.pid, cwd: info.cwd });
+      send(sock, { t: "terminalSpawned", ptyId: info.ptyId, pid: info.pid, cwd: info.cwd,
+                   fresh: false });
       return;
     }
 

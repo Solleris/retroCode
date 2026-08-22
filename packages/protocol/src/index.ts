@@ -197,7 +197,21 @@ export type AgentDelta = z.infer<typeof AgentDelta>;
 
 export const DaemonEvent = z.discriminatedUnion("t", [
   z.object({ t: z.literal("ready"), daemonPid: z.number(), version: z.string() }),
-  z.object({ t: z.literal("terminalSpawned"), ptyId: z.string(), pid: z.number(), cwd: z.string() }),
+  /*
+   * `fresh` marks a pty that was actually SPAWNED, as opposed to one that was
+   * already alive and got attached. The daemon has always known the difference
+   * and thrown it away; the app needs it to decide whether a restored pane
+   * still has its claude session in it or a brand-new shell.
+   *
+   * Optional, and TRUE means "new" — the polarity is load-bearing. The daemon
+   * is detached and outlives the app, so a running old daemon will omit this
+   * field entirely, and the renderer switches on `e.t` without validating.
+   * Absent must therefore mean "assume it survived, touch nothing": the failure
+   * mode is an inert auto-resume, not a `claude --resume` typed as a message
+   * into a live session.
+   */
+  z.object({ t: z.literal("terminalSpawned"), ptyId: z.string(), pid: z.number(), cwd: z.string(),
+             fresh: z.boolean().optional() }),
   z.object({ t: z.literal("terminalExited"), ptyId: z.string(), exitCode: z.number(), signal: z.number().optional() }),
   z.object({
     t: z.literal("terminalList"),
