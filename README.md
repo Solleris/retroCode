@@ -38,26 +38,6 @@ repo it shows:
 - **which session belongs to the pane in front of you** — click a row to jump to
   its pane, or resume one whose terminal is gone
 
-## Design principles
-
-**The real CLI runs inside it.** Not a reimplementation, not an API client with
-a chat panel. Terminals here are real ptys running your `$SHELL`, and `claude`
-in them is the same binary with your MCP servers, your permissions, your
-history.
-
-**The IDE never submits a prompt for you.** Everything it composes — a file, a
-Linear issue, a Notion page — is pasted into the composer and left there. You
-read it, you edit it, you press enter. Context injection that submits on your
-behalf is a different product.
-
-**No credentials in the IDE.** Linear and Notion are fetched through a headless
-`claude -p` scoped to a single MCP tool, so the authentication is the one your
-CLI already has.
-
-**Your processes outlive the window.** Quit the app and the daemon and its ptys
-stay alive; reopen and you get the same panes, the same shells, the scrollback
-replayed, and each pane still bound to its claude session.
-
 ## Quick start
 
 Requirements: **macOS**, **Node ≥ 25**, [**bun**](https://bun.sh), and the
@@ -66,7 +46,7 @@ Requirements: **macOS**, **Node ≥ 25**, [**bun**](https://bun.sh), and the
 ```bash
 git clone https://github.com/Solleris/retroCode.git
 cd retroCode
-bun install          # postinstall patches three native things — see below
+bun install          # postinstall patches node-pty and electron for bun
 bun run app          # the daemon starts itself
 ```
 
@@ -78,6 +58,7 @@ lens tracking it on the right.
 | | |
 |---|---|
 | <kbd>⌘J</kbd> | new terminal already running `claude` |
+| <kbd>⇧⏎</kbd> / <kbd>⌥⏎</kbd> | newline in the prompt, without submitting |
 | <kbd>⌘T</kbd> | new plain terminal |
 | <kbd>⌘D</kbd> / <kbd>⇧⌘D</kbd> | split below / split beside |
 | <kbd>⌘W</kbd> | close pane |
@@ -113,84 +94,13 @@ no restart.
 - `commands` — your own entries in the palette; each opens a terminal running
   its snippet.
 
-## Architecture
-
-Two processes, and one rule that decides what goes where.
-
-```
-retroCode.app (Electron)      main + preload + renderer
-    │ unix socket ~/.retro/retrod.sock
-    │ frames: [kind:u8][len:u32be][payload] — JSON for control, raw bytes for ptys
-retrod (Node)                 PtyManager · SQLite · transcript watcher · Agent SDK
-    │
-    └─ /bin/zsh -l            one per terminal
-```
-
-**The daemon owns processes, not content.** No text buffer, no AST, no document
-crosses that socket — typing latency never pays for an IPC hop. What the daemon
-does own is everything with a long life: ptys, the SQLite store, the file
-watchers. That is what makes a quit survivable, and a daemon restart too: every
-terminal on screen reattaches, or gets a fresh pty if its own died.
-
-<details>
-<summary>Why pty bytes get their own frame kind</summary>
-
-A noisy build dumps megabytes per second, and pushing that through JSON would
-cost ~33% in base64 plus the parse. The control channel stays JSON because being
-readable under `socat` while debugging is worth more than the microseconds.
-
-</details>
-
-<details>
-<summary>Three things <code>postinstall</code> repairs</summary>
-
-`scripts/fix-native.mjs` exists because bun does not run install scripts the way
-these packages need:
-
-1. **`node-pty`** — bun's store extraction drops the execute bit from
-   `spawn-helper`. Every pty spawn then fails with `posix_spawnp failed`, an
-   error that mentions permissions nowhere.
-2. **`electron`** — its `install.js` (which downloads the ~300MB binary) never
-   runs, and `electron-vite dev` fails on an empty `path.txt`.
-3. **the dev bundle's identity** — in development the app *is* node_modules'
-   `Electron.app`, so macOS shows "Electron" everywhere. The bundle and its
-   executable are renamed and `path.txt` is repointed. This is only safe because
-   the prebuilt binary is ad-hoc *linker-signed*: `codesign` reports
-   `Info.plist=not bound` and no sealed resources, so the hash covers the Mach-O
-   alone.
-
-</details>
-
-## Stack
-
-TypeScript end to end. Electron for the window, xterm.js with the WebGL renderer
-for terminals, CodeMirror 6 for the editor, better-sqlite3 and node-pty in the
-daemon, zod for the wire schema shared by both sides. No build step for the
-daemon — Node strips the types.
-
-## Status
-
-**Working today** — tiling panes with layout persistence, terminals that outlive
-the app, the lens, context and cost meters, click-to-focus and resume on session
-rows, side-by-side diff against HEAD, fuzzy finder, command palette, editor with
-markdown preview, Linear and Notion connectors, English/Portuguese UI, live
-theming.
-
-**Experimental**, reachable from the palette — an agent pane driven by the Agent
-SDK, and a multi-variant consensus runner that solves the same task N times in
-disposable worktrees and classifies each file as identical, equivalent,
-divergent or minority, so review happens by exception.
-
-**Not there yet** — keyboard navigation inside the lens, recency grouping in the
-session list, hunk-level accept in the diff, syntax highlighting inside the diff.
-
 ## Contributing
 
 Issues and pull requests are welcome. Two things worth knowing before a big one:
 
 - **Open an issue first** for anything that changes the architecture. The split
-  between daemon and renderer is deliberate, and the rule above ("processes, not
-  content") is the one to argue with.
+  between the daemon and the renderer is deliberate: the daemon owns processes,
+  not content. That rule is the one to argue with.
 - **Comments here explain *why*, not *what*.** The codebase documents the
   decision and the failure that motivated it, not the syntax on the next line.
   Matching that is the main review note anyone gets.
