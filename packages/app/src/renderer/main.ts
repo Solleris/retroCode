@@ -99,6 +99,30 @@ const ptyCwds = new Map<string, string>();
 const ptySessions = new Map<string, string>();
 let focusedPty: string | null = null;
 
+/**
+ * Launch lines waiting for their pty to EXIST.
+ *
+ * Writing straight after the split looks right and loses the bytes.
+ * `PtyManager.write` drops anything addressed to a ptyId it does not know (the
+ * early `if (!e?.alive) return`), and `createTerminal` only asks for the spawn
+ * on the next animation frame — so the command raced ahead of the pty and
+ * vanished. Measured against a running daemon: a write sent before
+ * `spawnTerminal` never reaches the shell; the same write after it does.
+ *
+ * The comment this replaces reasoned that input typed before the shell finished
+ * booting would sit in the TTY buffer and run afterwards. True — and about a pty
+ * that exists. The problem was never the shell's readiness.
+ *
+ * So the line waits for `terminalSpawned`, the one moment the app knows there is
+ * something to receive it.
+ */
+const pendingLaunch = new Map<string, string>();
+
+/** Types `line` into that pane as soon as its pty is real. Newline included. */
+function launchIn(ptyId: string, line: string): void {
+  pendingLaunch.set(ptyId, line);
+}
+
 function refreshLensProject(): void {
   if (focusedPty) {
     retro.send({ t: "resolvePtyProject", ptyId: focusedPty });
@@ -183,6 +207,7 @@ const tiling = new TilingHost($("#stage"), { s: "empty" }, {
       terms.delete(surface.ptyId);
       ptySessions.delete(surface.ptyId);
       ptyCwds.delete(surface.ptyId);
+      pendingLaunch.delete(surface.ptyId);
     } else if (surface.s === "editor") {
       docs.get(surface.path)?.dispose();
       docs.delete(surface.path);
@@ -297,7 +322,7 @@ function newClaudeSession(): void {
   tiling.split("h", surface);
   if (surface.s === "terminal") {
     ptySessions.set(surface.ptyId, sessionId);
-    retro.write(surface.ptyId, enc.encode(`claude --session-id ${sessionId}\n`));
+    launchIn(surface.ptyId, `claude --session-id ${sessionId}`);
     lens.setOwnedSessions(new Set(ptySessions.values()), sessionId);
   }
 }
@@ -379,7 +404,9 @@ function rebuildCommands(): void {
     run: () => {
       const surface = newTerminal();
       tiling.split("v", surface);
-      if (surface.s === "terminal") retro.write(surface.ptyId, enc.encode(`${c.run}\n`));
+      // Same race as ⌘J had: this used to write before the pty existed, so a
+      // command from config.json opened a terminal and then did nothing.
+      if (surface.s === "terminal") launchIn(surface.ptyId, c.run);
     },
   }));
 
@@ -417,6 +444,22 @@ retro.onControl((ev) => {
         n ? `● ${n} ${t("lens.yourTurn")}` : "",
         worst >= 60 ? `<b class="${worst >= 85 ? "at-bad" : "at-wait"}">◐ ctx ${worst}%</b>` : "",
       ].filter(Boolean).join(" · ");
+      return;
+    }
+
+    /*
+     * The pty is up — so anything queued for it can go now.
+     *
+     * This is the first thing in the app to listen to `terminalSpawned` at all:
+     * the event was being broadcast and dropped on the floor, which is exactly
+     * why the race above went unnoticed.
+     */
+    case "terminalSpawned": {
+      const ptyId = e["ptyId"] as string;
+      const pending = pendingLaunch.get(ptyId);
+      if (pending === undefined) return;
+      pendingLaunch.delete(ptyId);
+      retro.write(ptyId, enc.encode(`${pending}\n`));
       return;
     }
 
