@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, dialog, shell, Menu } from "electron";
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { DaemonLink } from "./daemon-link.ts";
 
 /*
@@ -162,7 +163,20 @@ function createWindow(): void {
   // hardcoding a path in a UI file is the start of an annoying debt.
   // argv[1] allows `retroCode . /path/to/project` later on.
   const argRoot = process.argv.slice(1).find((a) => a.startsWith("/") && existsSync(a));
-  const projectRoot = argRoot ?? resolve(import.meta.dirname, "../../../..");
+  /*
+   * The fallback cannot be derived from this file's location once packaged.
+   *
+   * Four levels up from `packages/app/out/main` is the repo root, which is what
+   * a developer running `electron-vite dev` wants. Four levels up from
+   * `Resources/app.asar/out/main` is `Contents` — so an installed app launched
+   * from the Finder opened ITSELF as the project, indexed its own bundle, and
+   * spawned terminals inside it. Correct arithmetic, meaningless answer.
+   *
+   * There is no cwd worth trusting either: Finder gives an app `/`. So the home
+   * directory is the honest default, and ⌘O is how you get to a real project.
+   */
+  const projectRoot = argRoot
+    ?? (app.isPackaged ? homedir() : resolve(import.meta.dirname, "../../../.."));
 
   const devUrl = process.env["ELECTRON_RENDERER_URL"];
   if (devUrl) void win.loadURL(`${devUrl}?root=${encodeURIComponent(projectRoot)}`);

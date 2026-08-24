@@ -10,3 +10,6 @@ out/
 
 # Throwaway development probes: they exist for one bug and die with it.
 packages/daemon/src/_*.mjs
+
+# Packaged builds.
+release/

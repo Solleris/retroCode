@@ -55,6 +55,29 @@ bun run app          # the daemon starts itself
 Press <kbd>⌘J</kbd> and you have a terminal already running `claude`, with the
 lens tracking it on the right.
 
+## Installing it as an app
+
+`bun run app` is the development loop. To get a `retroCode.app` you can launch
+from Spotlight instead:
+
+```bash
+bun run dist                       # → packages/app/release/mac-arm64/retroCode.app
+ditto packages/app/release/mac-arm64/retroCode.app /Applications/retroCode.app
+```
+
+`dist` does three things: bundles the daemon to real JavaScript (the dev loop
+runs the TypeScript directly, so this step exists only for the package), builds
+the renderer, and produces the bundle — ad-hoc signed, which is what makes
+macOS register it as an application rather than a folder that happens to launch.
+`bun run dist:dmg` produces a .dmg instead.
+
+The daemon ships in `Contents/Resources/daemon`, outside the asar archive: it
+loads native modules, and node-pty execs a helper binary by path, which cannot
+be done from inside an archive.
+
+The build is signed for **this machine only**. Handing it to another Mac needs a
+Developer ID and notarisation, or Gatekeeper refuses it on first launch.
+
 ## Durable terminals
 
 retroCode runs the terminals from a background daemon (`retrod`) so that closing

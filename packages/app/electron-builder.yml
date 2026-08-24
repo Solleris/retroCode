@@ -1,0 +1,71 @@
+appId: com.solleris.retrocode
+productName: retroCode
+
+directories:
+  output: release
+  buildResources: assets
+
+# The asar holds only what electron-vite emitted. Everything the renderer and
+# the main process need is already inlined there (the vite config externalises
+# nothing but `electron`), so no node_modules travel inside the app.
+files:
+  - out/**
+  - package.json
+
+# The daemon rides OUTSIDE the asar, and the destination is not arbitrary:
+# daemon-link.ts resolves `../../../daemon/dist/main.js` from the main process
+# file, which inside the bundle is `Resources/app.asar/out/main/index.mjs`.
+# Three levels up is `Resources`, so this is the one path that needs no code
+# change. Being outside the asar also means node-pty's `spawn-helper` is a real
+# file on disk — it is exec'd by path, and nothing can exec out of an archive.
+#
+# The explicit filter is load-bearing: without it the builder applies its
+# default matcher, which drops `node_modules`, and the copy silently arrives
+# with main.js and none of the packages it imports. The app then launches, the
+# daemon dies on its first `import "node-pty"` before its own logging exists,
+# and the status bar sits on "restarting" forever.
+# node_modules needs an entry of its OWN. The builder's matcher excludes it from
+# any directory it walks, so the first copy arrived with main.js and none of the
+# 101 packages it imports — an app that launches and whose daemon dies on its
+# first `import "node-pty"`, before its own logging exists. Naming the directory
+# as the copy root is what gets past that.
+extraResources:
+  - from: ../daemon/dist
+    to: daemon/dist
+    filter:
+      - "**/*"
+      - "!node_modules"
+  - from: ../daemon/dist/node_modules
+    to: daemon/dist/node_modules
+    filter:
+      - "**/*"
+
+
+# There is nothing native left in the app package to rebuild, and letting the
+# builder try would only give it the chance to fail.
+npmRebuild: false
+
+mac:
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+  target: dir
+  #
+  # Ad-hoc signed ("-"), which is not the same as unsigned and the difference is
+  # not cosmetic. Leaving it unsigned kept the ORIGINAL Electron binary's
+  # linker signature — `Identifier=Electron`, `Sealed Resources=none` — which
+  # the rebundling invalidates. The app still launched, but LaunchServices would
+  # not register it, so Spotlight never indexed it: `mdls` returned null for
+  # display name and kind, and typing the name found nothing. Signing ad-hoc
+  # seals the bundle under its own identifier and it becomes a real Application.
+  #
+  # This is still local-only. Handing the build to another Mac needs a Developer
+  # ID plus notarisation, or Gatekeeper refuses it on first launch.
+  identity: "-"
+  #
+  # The builder warns here that ad-hoc plus hardenedRuntime wants the
+  # com.apple.security.cs.disable-library-validation entitlement. Measured: it
+  # does not, because codesign seals the WHOLE bundle — the .node binaries under
+  # Resources/daemon included — so they carry the same ad-hoc signature as the
+  # executable loading them, and library validation permits that. If a future
+  # native module ever arrives already signed by someone else, that entitlement
+  # is the escape hatch; until then it would only weaken the sandbox for nothing.

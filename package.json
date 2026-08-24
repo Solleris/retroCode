@@ -14,10 +14,15 @@
     "dev": "echo 'Rode em dois terminais:  bun run daemon  |  bun run app'",
     "typecheck": "tsc -b packages/protocol packages/daemon packages/app",
     "postinstall": "node scripts/fix-native.mjs",
-    "fix-native": "node scripts/fix-native.mjs"
+    "fix-native": "node scripts/fix-native.mjs",
+    "build:daemon": "node scripts/build-daemon.mjs",
+    "build:app": "cd packages/app && ./node_modules/.bin/electron-vite build",
+    "dist": "bun run build:daemon && bun run build:app && cd packages/app && ./node_modules/.bin/electron-builder --dir",
+    "dist:dmg": "bun run build:daemon && bun run build:app && cd packages/app && ./node_modules/.bin/electron-builder --mac dmg"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.0"
   },
   "trustedDependencies": [
