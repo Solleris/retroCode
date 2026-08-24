@@ -28,7 +28,7 @@ import { execFile } from "node:child_process";
 
 ensureHome();
 const db = openDb();
-const ptys = new PtyManager();
+const ptys = new PtyManager(log);
 
 /**
  * The "current" project for logging purposes. The daemon serves N projects,
@@ -227,10 +227,17 @@ async function handle(sock: net.Socket, raw: unknown): Promise<void> {
         const info = ptys.spawn(req);
         db.prepare(`INSERT OR REPLACE INTO pty (id, cwd, created_at) VALUES (?, ?, ?)`)
           .run(info.ptyId, info.cwd, Date.now());
-        log("pty spawn", info.ptyId, "pid", info.pid, info.cwd);
-        ev(`term:${info.ptyId}`, "lane-start", info.cwd);
+        /*
+         * `fresh` is what makes the renderer write the automatic `claude` launch
+         * line. An ADOPTED terminal already has a shell — very possibly with a
+         * claude in it — that never stopped, so calling it fresh would type a
+         * second `claude` into a live session.
+         */
+        log(info.adopted ? "pty adopt" : "pty spawn", info.ptyId, "pid", info.pid,
+            info.durable ? "(tmux)" : "(pty direto)", info.cwd);
+        if (!info.adopted) ev(`term:${info.ptyId}`, "lane-start", info.cwd);
         broadcast({ t: "terminalSpawned", ptyId: info.ptyId, pid: info.pid, cwd: info.cwd,
-                    fresh: true });
+                    fresh: !info.adopted });
       } catch (e) {
         send(sock, { t: "error", message: `spawn falhou`, cause: String(e) });
       }
@@ -581,6 +588,21 @@ const server = net.createServer((sock) => {
 
 server.listen(SOCKET_PATH, () => log(`retrod ${PROTOCOL_VERSION} ouvindo em ${SOCKET_PATH} (pid ${process.pid})`));
 
+/*
+ * Terminals that outlived the previous retrod.
+ *
+ * Nothing is attached yet: the window asks for each pane by ptyId while it
+ * restores its layout, and THAT request is what adopts the session. Logging
+ * them here turns the handover into something you can see in the log instead
+ * of a coincidence you have to trust.
+ */
+{
+  const sobreviventes = ptys.orphans();
+  if (sobreviventes.length) {
+    log(`${sobreviventes.length} terminal(is) sobreviveram ao retrod anterior:`, sobreviventes.join(", "));
+  }
+}
+
 /**
  * Last line of defence. The daemon owns work that cannot be recreated — ptys
  * with state, agents mid-run. Dying from a stray exception costs far more than
@@ -590,15 +612,26 @@ process.on("uncaughtException", (err) => log("UNCAUGHT EXCEPTION:", err?.stack ?
 process.on("unhandledRejection", (r) => log("UNHANDLED REJECTION:", String(r)));
 
 /**
- * SIGTERM kills the ptys on purpose: that is the shutdown you asked for.
- * The case that matters is the OTHER one — the app closing, which does not come
- * through here. Then the ptys stay alive, which is the whole point.
+ * Shutdown HANDS THE TERMINALS OVER instead of killing them.
+ *
+ * This used to kill them, on the argument that SIGTERM is "the shutdown you
+ * asked for". That argument was wrong in the case that hurts: nobody who stops
+ * a daemon means to lose a build that has been running for forty minutes, and
+ * the daemon does not always get to choose when it dies — a crash or a
+ * tree-kill from whatever launched it looks exactly like this.
+ *
+ * With tmux the shell is not ours to end, so `shutdown()` drops the viewer and
+ * the next retrod adopts the session. Without tmux there is nothing to hand
+ * over and it still kills, which is the old behaviour, unchanged.
+ *
+ * The app closing does not come through here at all — the daemon simply keeps
+ * running, which was always the point.
  */
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
   process.on(sig, () => {
     log(`${sig} — encerrando`);
     agents.interruptAll();
-    ptys.killAll();
+    ptys.shutdown();
     server.close();
     try { unlinkSync(SOCKET_PATH); } catch { /* already gone */ }
     process.exit(0);

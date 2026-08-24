@@ -42,6 +42,8 @@ repo it shows:
 
 Requirements: **macOS**, **Node ≥ 25**, [**bun**](https://bun.sh), and the
 [**Claude Code CLI**](https://claude.com/claude-code) on your `PATH`.
+Optionally **tmux**, which makes terminals survive a daemon restart — see
+[Durable terminals](#durable-terminals).
 
 ```bash
 git clone https://github.com/Solleris/retroCode.git
@@ -52,6 +54,39 @@ bun run app          # the daemon starts itself
 
 Press <kbd>⌘J</kbd> and you have a terminal already running `claude`, with the
 lens tracking it on the right.
+
+## Durable terminals
+
+retroCode runs the terminals from a background daemon (`retrod`) so that closing
+the window does not kill your sessions. The daemon itself was still a single
+point of failure, though: it owned the shells, so if it died — a crash, a
+`kill`, whatever launched it going down — every terminal died with it.
+
+Install tmux and it stops owning them:
+
+```bash
+brew install tmux
+```
+
+From then on each terminal is a tmux session on a private tmux server
+(`tmux -L retro`, never your own). The shell belongs to that server, so retrod
+can die and restart and the next one adopts the sessions that are still running
+— the build keeps building. You will see the handover in `~/.retro/retrod.log`:
+
+```
+3 terminal(is) sobreviveram ao retrod anterior: pty-a1b2, …
+pty adopt pty-a1b2 pid 4711 (tmux) /Users/you/code/api
+```
+
+Nothing about tmux is visible in the UI: no status bar, no prefix key, no escape
+delay. Without tmux everything still works exactly as before — the terminals are
+simply not durable.
+
+To check it on your own machine, `node packages/daemon/test/durability.mjs`
+starts a daemon of its own, leaves a long-running child in a terminal, kills the
+daemon, and asks the operating system whether the shell is still there. It
+asserts survival and adoption with tmux installed and the old behaviour without
+it, so the verdict flips when you install tmux.
 
 ## Shortcuts
 
